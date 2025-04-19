@@ -1,93 +1,33 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
-
-const payRates = {
-  base: 15.1,
-  unsocial: 18.88,
-  overtime: 22.65,
-  holiday: 30.2,
-};
-
-function calculateBreakDuration(hours) {
-  if (hours >= 8) return 1;
-  if (hours >= 6) return 0.5;
-  if (hours > 0) return 0.25;
-  return 0;
-}
-
-function formatTime(timeStr) {
-  const [h, m] = timeStr.split(':');
-  return `${h.padStart(2, '0')}:${m.padStart(2, '0')}`;
-}
-
-function formatDate(dateStr) {
-  const d = new Date(dateStr);
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' });
-}
-
-function segmentPay({ start, end, date, isSunday, isHoliday }) {
-  const segs = [
-    { label: 'unsocial', from: 0, to: 7, rate: payRates.unsocial },
-    { label: 'base', from: 7, to: 24, rate: payRates.base },
-  ];
-
-  let total = 0;
-  const breakdown = [];
-  const startHr = parseInt(start.split(':')[0], 10) + parseInt(start.split(':')[1], 10) / 60;
-  const endHr = parseInt(end.split(':')[0], 10) + parseInt(end.split(':')[1], 10) / 60;
-  let duration = endHr - startHr;
-  let unpaid = calculateBreakDuration(duration);
-  duration -= unpaid;
-
-  if (isHoliday) {
-    const amt = duration * payRates.holiday;
-    total = amt;
-    breakdown.push({ type: 'Holiday', hours: duration, rate: payRates.holiday, total: amt });
-  } else if (isSunday) {
-    const amt = duration * payRates.overtime;
-    total = amt;
-    breakdown.push({ type: 'Sunday', hours: duration, rate: payRates.overtime, total: amt });
-  } else {
-    segs.forEach(seg => {
-      const from = Math.max(startHr, seg.from);
-      const to = Math.min(endHr, seg.to);
-      const overlap = Math.max(0, to - from);
-      if (overlap > 0) {
-        const amt = overlap * seg.rate;
-        breakdown.push({ type: seg.label, hours: overlap, rate: seg.rate, total: amt });
-        total += amt;
-      }
-    });
-  }
-
-  return { total: total.toFixed(2), unpaid, breakdown };
-}
+import { formatTime, formatDate, calculatePayBreakdown, isHoliday, isSunday } from '../utils/helpers';
+import Modal from './Modal';
 
 export default function ShiftTable({ session, reloadFlag }) {
   const [shifts, setShifts] = useState([]);
-  const [holidays, setHolidays] = useState([]);
-  const [visibleNote, setVisibleNote] = useState(null);
+  const [selectedShift, setSelectedShift] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
 
   useEffect(() => {
-    const fetchData = async () => {
-      const [shiftRes, holidayRes] = await Promise.all([
-        supabase.from('shifts').select('*').eq('user_id', session.user.id).order('shift_date', { ascending: false }),
-        supabase.from('holidays').select('*'),
-      ]);
-      if (!shiftRes.error && !holidayRes.error) {
-        setShifts(shiftRes.data);
-        setHolidays(holidayRes.data.map(h => h.date));
-      }
+    const fetchShifts = async () => {
+      const { data, error } = await supabase
+        .from('shifts')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .order('shift_date', { ascending: false });
+      if (error) console.error(error);
+      else setShifts(data);
     };
-    fetchData();
-  }, [session, reloadFlag]);
-  console.log('Loaded shifts:', shifts); // Debugging line
-  console.log('Loaded holidays:', holidays); // Debugging line
-  const isSunday = (dateStr) => new Date(dateStr).getDay() === 0;
-  const isHoliday = (dateStr) => holidays.includes(dateStr);
+    fetchShifts();
+  }, [session.user.id, reloadFlag]);
+
+  const totalPages = Math.ceil(shifts.length / itemsPerPage);
+  const paginatedShifts = shifts.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  const goToPage = (page) => setCurrentPage(page);
 
   return (
-    <div className="table-box">
+    <div className="shift-table">
       <h2>Your Shifts</h2>
       <table>
         <thead>
@@ -96,12 +36,12 @@ export default function ShiftTable({ session, reloadFlag }) {
             <th>Start</th>
             <th>End</th>
             <th>Pay (€)</th>
-            <th>🛈</th>
+            <th><span role="img" aria-label="info">ℹ️</span></th>
           </tr>
         </thead>
         <tbody>
-          {shifts.map((s) => {
-            const breakdown = segmentPay({
+          {paginatedShifts.map((s) => {
+            const breakdown = calculatePayBreakdown({
               start: s.start_time,
               end: s.end_time,
               date: s.shift_date,
@@ -113,27 +53,49 @@ export default function ShiftTable({ session, reloadFlag }) {
                 <td>{formatDate(s.shift_date)}</td>
                 <td>{formatTime(s.start_time)}</td>
                 <td>{formatTime(s.end_time)}</td>
-                <td title={`Unpaid break: ${breakdown.unpaid}h`}>€{breakdown.total}</td>
+                <td>€{breakdown.total.toFixed(2)}</td>
                 <td>
-                  {s.notes && (
-                    <span
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => setVisibleNote(visibleNote === s.id ? null : s.id)}
-                      title={s.notes}
-                    >
-                      ℹ️
-                    </span>
-                  )}
+                  <button onClick={() => setSelectedShift({ ...s, breakdown })}>i</button>
                 </td>
               </tr>
             );
           })}
         </tbody>
       </table>
-      {visibleNote && (
-        <div className="note-tooltip">
-          <p>{shifts.find(s => s.id === visibleNote)?.notes}</p>
-        </div>
+
+      <div className="pagination">
+        {Array.from({ length: totalPages }, (_, i) => (
+          <button
+            key={i}
+            onClick={() => goToPage(i + 1)}
+            disabled={i + 1 === currentPage}
+          >
+            {i + 1}
+          </button>
+        ))}
+      </div>
+
+      {selectedShift && (
+        <Modal
+          title={`${formatDate(selectedShift.shift_date)} Shift Details`}
+          onClose={() => setSelectedShift(null)}
+        >
+          <p><strong>Start:</strong> {formatTime(selectedShift.start_time)}</p>
+          <p><strong>End:</strong> {formatTime(selectedShift.end_time)}</p>
+          <hr />
+          {selectedShift.breakdown.holidayHours > 0 && (
+            <p><strong>BANK HOLIDAY:</strong> {selectedShift.breakdown.holidayHours.toFixed(2)}h - {selectedShift.breakdown.breakHours}h (Break) × €{selectedShift.breakdown.holidayRate} = €{selectedShift.breakdown.holidayPay.toFixed(2)}</p>
+          )}
+          {selectedShift.breakdown.sundayHours > 0 && selectedShift.breakdown.holidayHours === 0 && (
+            <p><strong>SUNDAY:</strong> {selectedShift.breakdown.sundayHours.toFixed(2)}h - {selectedShift.breakdown.breakHours}h (Break) × €{selectedShift.breakdown.sundayRate} = €{selectedShift.breakdown.sundayPay.toFixed(2)}</p>
+          )}
+          {selectedShift.breakdown.unsocialHours > 0 && (
+            <p><strong>UNSOCIAL:</strong> {selectedShift.breakdown.unsocialHours.toFixed(2)}h × €{selectedShift.breakdown.unsocialRate} = €{selectedShift.breakdown.unsocialPay.toFixed(2)}</p>
+          )}
+          {selectedShift.breakdown.baseHours > 0 && selectedShift.breakdown.holidayHours === 0 && selectedShift.breakdown.sundayHours === 0 && (
+            <p><strong>BASE:</strong> {selectedShift.breakdown.baseHours.toFixed(2)}h - {selectedShift.breakdown.breakHours}h (Break) × €{selectedShift.breakdown.baseRate} = €{selectedShift.breakdown.basePay.toFixed(2)}</p>
+          )}
+        </Modal>
       )}
     </div>
   );
