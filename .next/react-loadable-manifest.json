@@ -20,5 +20,11 @@
   "node_modules/@supabase/storage-js/dist/module/lib/helpers.js -> @supabase/node-fetch": {
     "id": "node_modules/@supabase/storage-js/dist/module/lib/helpers.js -> @supabase/node-fetch",
     "files": []
+  },
+  "pages/index.js -> ../components/Auth": {
+    "id": "pages/index.js -> ../components/Auth",
+    "files": [
+      "static/chunks/_pages-dir-browser_components_Auth_jsx.js"
+    ]
   }
 }

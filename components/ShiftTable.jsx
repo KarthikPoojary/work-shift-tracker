@@ -81,7 +81,8 @@ export default function ShiftTable({ session, reloadFlag }) {
     };
     fetchData();
   }, [session, reloadFlag]);
-
+  console.log('Loaded shifts:', shifts); // Debugging line
+  console.log('Loaded holidays:', holidays); // Debugging line
   const isSunday = (dateStr) => new Date(dateStr).getDay() === 0;
   const isHoliday = (dateStr) => holidays.includes(dateStr);
 
