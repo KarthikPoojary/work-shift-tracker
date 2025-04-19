@@ -1,0 +1,59 @@
+/* styles/Settings.module.css */
+.page {
+    max-width: 800px;
+    margin: auto;
+    padding: 2rem 1rem;
+    font-family: sans-serif;
+  }
+  
+  .title {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    margin-bottom: 1rem;
+  }
+  
+  .tabs {
+    display: flex;
+    gap: .5rem;
+    margin-bottom: 2rem;
+  }
+  
+  .tab,
+  .activeTab,
+  .homeButton {
+    flex: none;
+    padding: .6rem 1.2rem;
+    border: none;
+    border-radius: 4px;
+    font-size: .95rem;
+    cursor: pointer;
+    transition: background .2s;
+  }
+  
+  .tab {
+    background: #f0f0f0;
+    color: #333;
+  }
+  .tab:hover {
+    background: #e0e0e0;
+  }
+  
+  .activeTab {
+    background: #0055ff;
+    color: #fff;
+  }
+  
+  .homeButton {
+    margin-left: auto;
+    background: #333;
+    color: #fff;
+  }
+  
+  .content {
+    background: #fff;
+    border-radius: 8px;
+    padding: 1.5rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,.05);
+  }
+  

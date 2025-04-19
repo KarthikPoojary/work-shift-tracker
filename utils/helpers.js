@@ -6,10 +6,10 @@
 
 // Format “YYYY‑MM‑DD” → “DD‑MMM‑YY” (e.g. 17‑Apr‑25)
 export function formatDate(dateStr) {
-  const d = new Date(dateStr);
-  const dd = String(d.getDate()).padStart(2, '0');
+  const d   = new Date(dateStr);
+  const dd  = String(d.getDate()).padStart(2, '0');
   const mmm = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
-  const yy = String(d.getFullYear()).slice(-2);
+  const yy  = String(d.getFullYear()).slice(-2);
   return `${dd}-${mmm}-${yy}`;
 }
 
@@ -23,7 +23,7 @@ export function formatTime(timeStr) {
 // ─── HOLIDAY & SUNDAY CHECKS ───────────────────────────────────────────────────
 //
 
-// Simple Sunday check
+// Is this date a Sunday?
 export function isSunday(dateStr) {
   return new Date(dateStr).getDay() === 0;
 }
@@ -36,7 +36,7 @@ export function setHolidayDates(dates) {
   holidayDates = dates;
 }
 
-// Check if a date is in that list
+// Check if a date is marked holiday
 export function isHoliday(dateStr) {
   return holidayDates.includes(dateStr);
 }
@@ -45,10 +45,11 @@ export function isHoliday(dateStr) {
 // ─── BREAK CALCULATION ─────────────────────────────────────────────────────────
 //
 
-// Unpaid break policy: >6h → 1h, else 0
+// Unpaid break policy: >8h→1h, ≥6h→0.5h, <6h→0.25h
 export function calculateBreak(hours) {
   if (hours >= 8)  return 1;
   if (hours >= 6)  return 0.5;
+  if (hours >  0)  return 0.25;
   return 0;
 }
 
@@ -58,13 +59,22 @@ export function calculateBreak(hours) {
 
 /**
  * calculatePayBreakdown()
- * @param {{start:string,end:string,date:string,isHoliday:boolean,isSunday:boolean}}
+ * 
+ * @param {Object} params
+ * @param {string} params.start     – “HH:MM”
+ * @param {string} params.end       – “HH:MM”
+ * @param {string} params.date      – “YYYY‑MM‑DD”
+ * @param {boolean} params.isHoliday
+ * @param {boolean} params.isSunday
+ * 
  * @returns {{
  *   baseHours, baseRate, basePay,
  *   unsocialHours, unsocialRate, unsocialPay,
  *   sundayHours, sundayRate, sundayPay,
  *   holidayHours, holidayRate, holidayPay,
- *   breakHours, total, totalHours
+ *   breakHours,
+ *   total,
+ *   totalHours
  * }}
  */
 export function calculatePayBreakdown({
@@ -77,23 +87,22 @@ export function calculatePayBreakdown({
   // 1) Convert “HH:MM” → decimal hours
   const toDec = (t) => {
     const [h, m] = t.split(':').map(Number);
-    return h + m/60;
+    return h + m / 60;
   };
   const startH = toDec(start);
   const endH   = toDec(end);
-  let rawHrs = endH - startH;
+  let rawHrs   = endH - startH;
   if (rawHrs <= 0) {
     return { total: 0, totalHours: 0 };
   }
 
-  // 2) Unpaid break: if >6h
+  // 2) Unpaid break: if >6h → 1h, else none here (you also have calculateBreak if you want 0.25h etc)
   const breakHrs = rawHrs > 6 ? 1 : 0;
   const netHrs   = rawHrs - breakHrs;
 
-  // 3) Unsocial hours windows (00–08 & 20–24)
-  const earlyUnsocial = Math.max(0, Math.min(endH, 8) - Math.max(startH, 0));
-  const lateUnsocial  = Math.max(0, Math.min(endH,24) - Math.max(startH,20));
-  const unsocialHrs   = earlyUnsocial + lateUnsocial;
+  // 3) UNSOCIAL hours **00:00–07:00** only
+  const earlyUnsocial = Math.max(0, Math.min(endH, 7) - Math.max(startH, 0));
+  const unsocialHrs   = earlyUnsocial;
 
   // 4) Base hours = remainder
   const baseHrs = netHrs - unsocialHrs;
@@ -106,22 +115,21 @@ export function calculatePayBreakdown({
     holiday:  30.20,
   };
 
-  // 6) Default pays
+  // 6) Default pay computation
   let basePay     = baseHrs      * rates.base;
   let unsocialPay = unsocialHrs  * rates.unsocial;
   let sundayPay   = 0;
   let holidayPay  = 0;
 
-  // 7) Override logic
+  // 7) Override for holiday / Sunday
   if (holidayFlag) {
-    basePay = 0;
+    basePay     = 0;
     unsocialPay = 0;
-    holidayPay = netHrs * rates.holiday;
-  }
-  else if (sundayFlag) {
-    basePay = 0;
+    holidayPay  = netHrs * rates.holiday;
+  } else if (sundayFlag) {
+    basePay     = 0;
     unsocialPay = 0;
-    sundayPay = netHrs * rates.sunday;
+    sundayPay   = netHrs * rates.sunday;
   }
 
   // 8) Totals
@@ -144,8 +152,8 @@ export function calculatePayBreakdown({
     holidayRate:   rates.holiday,
     holidayPay,
 
-    breakHours:   breakHrs,
+    breakHours:    breakHrs,
     total,
-    totalHours:   netHrs,
+    totalHours:    netHrs,
   };
 }
