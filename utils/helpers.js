@@ -1,101 +1,151 @@
+// utils/helpers.js
+
+//
+// ─── FORMATTERS ────────────────────────────────────────────────────────────────
+//
+
+// Format “YYYY‑MM‑DD” → “DD‑MMM‑YY” (e.g. 17‑Apr‑25)
 export function formatDate(dateStr) {
-    const d = new Date(dateStr);
-    return d.toLocaleDateString('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      year: '2-digit',
-    });
+  const d = new Date(dateStr);
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mmm = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+  const yy = String(d.getFullYear()).slice(-2);
+  return `${dd}-${mmm}-${yy}`;
+}
+
+// Format “HH:MM[:SS]” → “HH:MM”
+export function formatTime(timeStr) {
+  const [h, m] = timeStr.split(':');
+  return `${h.padStart(2,'0')}:${m.padStart(2,'0')}`;
+}
+
+//
+// ─── HOLIDAY & SUNDAY CHECKS ───────────────────────────────────────────────────
+//
+
+// Simple Sunday check
+export function isSunday(dateStr) {
+  return new Date(dateStr).getDay() === 0;
+}
+
+// In‑memory list of holiday dates (“YYYY‑MM‑DD”)
+let holidayDates = [];
+
+// Overwrite holiday list (e.g. fetched from Supabase)
+export function setHolidayDates(dates) {
+  holidayDates = dates;
+}
+
+// Check if a date is in that list
+export function isHoliday(dateStr) {
+  return holidayDates.includes(dateStr);
+}
+
+//
+// ─── BREAK CALCULATION ─────────────────────────────────────────────────────────
+//
+
+// Unpaid break policy: >6h → 1h, else 0
+export function calculateBreak(hours) {
+  if (hours >= 8)  return 1;
+  if (hours >= 6)  return 0.5;
+  return 0;
+}
+
+//
+// ─── PAY BREAKDOWN ─────────────────────────────────────────────────────────────
+//
+
+/**
+ * calculatePayBreakdown()
+ * @param {{start:string,end:string,date:string,isHoliday:boolean,isSunday:boolean}}
+ * @returns {{
+ *   baseHours, baseRate, basePay,
+ *   unsocialHours, unsocialRate, unsocialPay,
+ *   sundayHours, sundayRate, sundayPay,
+ *   holidayHours, holidayRate, holidayPay,
+ *   breakHours, total, totalHours
+ * }}
+ */
+export function calculatePayBreakdown({
+  start,
+  end,
+  date,
+  isHoliday: holidayFlag,
+  isSunday: sundayFlag
+}) {
+  // 1) Convert “HH:MM” → decimal hours
+  const toDec = (t) => {
+    const [h, m] = t.split(':').map(Number);
+    return h + m/60;
+  };
+  const startH = toDec(start);
+  const endH   = toDec(end);
+  let rawHrs = endH - startH;
+  if (rawHrs <= 0) {
+    return { total: 0, totalHours: 0 };
   }
-  
-  export function formatTime(timeStr) {
-    const [h, m] = timeStr.split(':');
-    return `${h.padStart(2, '0')}:${m.padStart(2, '0')}`;
+
+  // 2) Unpaid break: if >6h
+  const breakHrs = rawHrs > 6 ? 1 : 0;
+  const netHrs   = rawHrs - breakHrs;
+
+  // 3) Unsocial hours windows (00–08 & 20–24)
+  const earlyUnsocial = Math.max(0, Math.min(endH, 8) - Math.max(startH, 0));
+  const lateUnsocial  = Math.max(0, Math.min(endH,24) - Math.max(startH,20));
+  const unsocialHrs   = earlyUnsocial + lateUnsocial;
+
+  // 4) Base hours = remainder
+  const baseHrs = netHrs - unsocialHrs;
+
+  // 5) Rate definitions
+  const rates = {
+    base:     15.10,
+    unsocial: 18.88,
+    sunday:   22.65,
+    holiday:  30.20,
+  };
+
+  // 6) Default pays
+  let basePay     = baseHrs      * rates.base;
+  let unsocialPay = unsocialHrs  * rates.unsocial;
+  let sundayPay   = 0;
+  let holidayPay  = 0;
+
+  // 7) Override logic
+  if (holidayFlag) {
+    basePay = 0;
+    unsocialPay = 0;
+    holidayPay = netHrs * rates.holiday;
   }
-  
-  export function isSunday(dateStr) {
-    return new Date(dateStr).getDay() === 0;
+  else if (sundayFlag) {
+    basePay = 0;
+    unsocialPay = 0;
+    sundayPay = netHrs * rates.sunday;
   }
-  
-  export let holidayDates = [];
-  export function setHolidayDates(dates) {
-    holidayDates = dates;
-  }
-  
-  export function isHoliday(dateStr) {
-    return holidayDates.includes(dateStr);
-  }
-  
-  export function calculateBreak(hours) {
-    if (hours >= 8) return 1;
-    if (hours >= 6) return 0.5;
-    if (hours > 0) return 0.25;
-    return 0;
-  }
-  
-  export function calculatePayBreakdown({ start, end, date, isSunday, isHoliday }) {
-    const baseRate = 15.10;
-    const unsocialRate = 18.88;
-    const sundayRate = 22.65;
-    const holidayRate = 30.20;
-  
-    const startHr = parseInt(start.split(':')[0], 10) + parseInt(start.split(':')[1], 10) / 60;
-    const endHr = parseInt(end.split(':')[0], 10) + parseInt(end.split(':')[1], 10) / 60;
-  
-    let totalHours = endHr - startHr;
-    const breakHours = calculateBreak(totalHours);
-  
-    let breakdown = {
-      holidayHours: 0,
-      holidayRate,
-      holidayPay: 0,
-      sundayHours: 0,
-      sundayRate,
-      sundayPay: 0,
-      unsocialHours: 0,
-      unsocialRate,
-      unsocialPay: 0,
-      baseHours: 0,
-      baseRate,
-      basePay: 0,
-      total: 0,
-      breakHours
-    };
-  
-    if (isHoliday) {
-      const payHours = totalHours - breakHours;
-      breakdown.holidayHours = totalHours;
-      breakdown.holidayPay = payHours * holidayRate;
-      breakdown.total = breakdown.holidayPay;
-      return breakdown;
-    }
-  
-    if (isSunday) {
-      const payHours = totalHours - breakHours;
-      breakdown.sundayHours = totalHours;
-      breakdown.sundayPay = payHours * sundayRate;
-      breakdown.total = breakdown.sundayPay;
-      return breakdown;
-    }
-  
-    // Weekday: compute unsocial and base separately
-    const unsocialStart = 0;
-    const unsocialEnd = 8;
-    const unsocialLateStart = 20;
-    const unsocialLateEnd = 24;
-  
-    const unsocialEarly = Math.max(0, Math.min(endHr, unsocialEnd) - Math.max(startHr, unsocialStart));
-    const unsocialLate = Math.max(0, Math.min(endHr, unsocialLateEnd) - Math.max(startHr, unsocialLateStart));
-    const unsocialHours = unsocialEarly + unsocialLate;
-  
-    const baseHours = totalHours - unsocialHours;
-    const basePayHours = Math.max(0, baseHours - breakHours);
-  
-    breakdown.unsocialHours = unsocialHours;
-    breakdown.unsocialPay = unsocialHours * unsocialRate;
-    breakdown.baseHours = baseHours;
-    breakdown.basePay = basePayHours * baseRate;
-    breakdown.total = breakdown.unsocialPay + breakdown.basePay;
-  
-    return breakdown;
-  }
-  
+
+  // 8) Totals
+  const total = basePay + unsocialPay + sundayPay + holidayPay;
+
+  return {
+    baseHours:    baseHrs,
+    baseRate:     rates.base,
+    basePay,
+
+    unsocialHours: unsocialHrs,
+    unsocialRate:  rates.unsocial,
+    unsocialPay,
+
+    sundayHours:   sundayFlag && !holidayFlag ? netHrs : 0,
+    sundayRate:    rates.sunday,
+    sundayPay,
+
+    holidayHours:  holidayFlag ? netHrs : 0,
+    holidayRate:   rates.holiday,
+    holidayPay,
+
+    breakHours:   breakHrs,
+    total,
+    totalHours:   netHrs,
+  };
+}
